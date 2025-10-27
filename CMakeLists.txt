@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.10)
+project(HeatDiffusion)
+set(CMAKE_CXX_STANDARD 11)
+find_package(Eigen3 REQUIRED)
+find_package(OpenMP REQUIRED)
+include_directories(${EIGEN3_INCLUDE_DIR})
+add_executable(naively_matrix_multiplication naively_matrix_multiplication.cpp)
+target_link_libraries(naively_matrix_multiplication PRIVATE OpenMP::OpenMP_CXX)
