@@ -64,38 +64,44 @@ double ** naively_matrix_multiplication_parallel(double ** matrixA, int rowsA, i
         matrix_out[i] = new double [columnsB];
     }
 
-    #pragma openmp parallel default(none) shared(rowsA, columnsB, columnsA, matrix_out, matrixA, matrixB) if(rowsA >= omp_get_max_threads())
+    if(rowsA >= omp_get_max_threads())
     {
-        #pragma omp for
-        for(int i = 0 ; i < rowsA ; ++i)
+        #pragma openmp parallel default(none) shared(rowsA, columnsB, columnsA, matrix_out, matrixA, matrixB) if(columnsB > 100)
         {
-            for(int j = 0 ; j < columnsB ; ++j)
+            #pragma omp for
+            for(int i = 0 ; i < rowsA ; ++i)
             {
-                double sum  = 0;
-                for(int z = 0 ; z < columnsA ; ++z) //columns A == rows B so we consider either of them
+                for(int j = 0 ; j < columnsB ; ++j)
                 {
-                    sum += matrixA[i][z] * matrixB[z][j];
+                    double sum  = 0;
+                    for(int z = 0 ; z < columnsA ; ++z) //columns A == rows B so we consider either of them
+                    {
+                        sum += matrixA[i][z] * matrixB[z][j];
+                    }
+                    matrix_out[i][j] = sum;
                 }
-                matrix_out[i][j] = sum;
             }
         }
     }
-
-    #pragma openmp parallel default(none) shared(rowsA, columnsB, columnsA, matrix_out, matrixA, matrixB) if(rowsA < omp_get_max_threads())
+    
+    else
     {
-        double sum = 0; //omp for collapse need a perfect loop so i adjust the declaration position of the sum
-        #pragma omp for collapse(3)
-        for(int i = 0 ; i < rowsA ; ++i)
+        #pragma openmp parallel default(none) shared(rowsA, columnsB, columnsA, matrix_out, matrixA, matrixB) if(columnsB > 100)
         {
-            for(int j = 0 ; j < columnsB ; ++j)
+            double sum = 0; //omp for collapse need a perfect loop so i adjust the declaration position of the sum
+            #pragma omp for collapse(3)
+            for(int i = 0 ; i < rowsA ; ++i)
             {
-                for(int z = 0 ; z < columnsA ; ++z) //columns A == rows B so we consider either of them
+                for(int j = 0 ; j < columnsB ; ++j)
                 {
-                    sum += matrixA[i][z] * matrixB[z][j];
-                    if(z + 1 == columnsA) //for perfect loop
+                    for(int z = 0 ; z < columnsA ; ++z) //columns A == rows B so we consider either of them
                     {
-                        matrix_out[i][j] = sum;
-                        sum = 0;
+                        sum += matrixA[i][z] * matrixB[z][j];
+                        if(z + 1 == columnsA) //for perfect loop
+                        {
+                            matrix_out[i][j] = sum;
+                            sum = 0;
+                        }
                     }
                 }
             }
