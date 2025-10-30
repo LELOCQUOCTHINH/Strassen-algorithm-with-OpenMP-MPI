@@ -4,5 +4,9 @@
 # Allow specific files to be tracked
 !CMakeLists.txt
 !naively_matrix_multiplication.cpp
-!strassen_algorithm_openMP.cpp
+!strassen_algorithm_openmp.cpp
 !strassen_algorithm_sequential.cpp
+!naively_matrix_multiplication.h
+!strassen_algorithm_openmp.h
+!strassen_algorithm_sequential.h
+!comparisor.cpp

@@ -1,42 +1,4 @@
-#include <iostream>
-#include <iomanip>
-#include <vector>
-#include <cmath>
-#include <omp.h>
-#include <eigen3/Eigen/Dense>
-using namespace std;
-using namespace Eigen;
-
-// Function to print a matrix
-void printMatrix(const vector<vector<double>>& matrix) {
-    if (matrix.empty()) {
-        cout << "Matrix is empty!" << endl;
-        return;
-    }
-    cout << "Matrix (" << matrix.size() << "x" << matrix[0].size() << "):" << endl;
-    for (const auto& row : matrix) {
-        for (double val : row) {
-            cout << setw(8) << fixed << setprecision(2) << val << " ";
-        }
-        cout << endl;
-    }
-}
-
-// Function to compare Strassen result with Eigen
-bool compareMatrices(const vector<vector<double>>& matrix1, const MatrixXd& matrix2, int rows, int cols, double epsilon = 1e-6) {
-    bool isEqual = true;
-    for (int i = 0; i < rows; ++i) {
-        for (int j = 0; j < cols; ++j) {
-            if (abs(matrix1[i][j] - matrix2(i, j)) > epsilon) {
-                isEqual = false;
-                cout << "Mismatch at [" << i << "][" << j << "]: "
-                     << "Strassen = " << fixed << setprecision(2) << matrix1[i][j]
-                     << ", Eigen = " << matrix2(i, j) << endl;
-            }
-        }
-    }
-    return isEqual;
-}
+#include "strassen_algorithm_sequential.h"
 
 // Function to add two matrices
 vector<vector<double>> matrixAdd(const vector<vector<double>>& A, const vector<vector<double>>& B) {
@@ -132,13 +94,10 @@ vector<vector<double>> strassenMultiply(const vector<vector<double>>& A, const v
 }
 
 // Pad matrix to next power of 2
-vector<vector<double>> padMatrix(const vector<vector<double>>& matrix) {
+vector<vector<double>> padMatrix(const vector<vector<double>>& matrix, int size) {
     int rows = matrix.size();
     int cols = matrix[0].size();
-    int size = 1;
-    while (size < max(rows, cols)) {
-        size *= 2;
-    }
+
     vector<vector<double>> padded(size, vector<double>(size, 0.0));
     for (int i = 0; i < rows; ++i) {
         for (int j = 0; j < cols; ++j) {
@@ -160,7 +119,7 @@ vector<vector<double>> unpadMatrix(const vector<vector<double>>& padded, int row
 }
 
 // Wrapper for Strassen multiplication
-vector<vector<double>> strassen(const vector<vector<double>>& A, const vector<vector<double>>& B) {
+vector<vector<double>> strassen_sequential(const vector<vector<double>>& A, const vector<vector<double>>& B) {
     int rowsA = A.size();
     int colsA = A[0].size();
     int rowsB = B.size();
@@ -170,97 +129,14 @@ vector<vector<double>> strassen(const vector<vector<double>>& A, const vector<ve
         return {};
     }
 
-    auto paddedA = padMatrix(A);
-    auto paddedB = padMatrix(B);
+    int size = 1;
+    int padded_size = max(rowsA, max(colsA, max(rowsB, colsB)));
+    while (size < padded_size) {
+        size *= 2;
+    }
+
+    auto paddedA = padMatrix(A, size);
+    auto paddedB = padMatrix(B, size);
     auto paddedC = strassenMultiply(paddedA, paddedB);
     return unpadMatrix(paddedC, rowsA, colsB);
-}
-
-int main() {
-    // Test 1: Small matrices (3x5 * 5x6)
-    cout << "=== Test 1: Small Matrices (3x5 * 5x6) ===\n";
-    vector<vector<double>> matrixA = {
-        {0, 8, 6, 9, 2},
-        {9, 5, 4, 1, 6},
-        {8, 3, 2, 6, 1}
-    };
-    vector<vector<double>> matrixB = {
-        {8, 8, 6, 4, 2, 7},
-        {9, 5, 1, 6, 4, 9},
-        {6, 6, 2, 2, 5, 4},
-        {8, 8, 1, 7, 3, 2},
-        {9, 0, 6, 8, 4, 2}
-    };
-    int rowsA = matrixA.size(), colsA = matrixA[0].size();
-    int rowsB = matrixB.size(), colsB = matrixB[0].size();
-
-    // Eigen reference result
-    MatrixXd eigenA(rowsA, colsA);
-    for (int i = 0; i < rowsA; ++i) {
-        for (int j = 0; j < colsA; ++j) {
-            eigenA(i, j) = matrixA[i][j];
-        }
-    }
-    MatrixXd eigenB(rowsB, colsB);
-    for (int i = 0; i < rowsB; ++i) {
-        for (int j = 0; j < colsB; ++j) {
-            eigenB(i, j) = matrixB[i][j];
-        }
-    }
-    MatrixXd eigenResult = eigenA * eigenB;
-
-    // Time and test Strassen
-    double start = omp_get_wtime();
-    auto strassenResult = strassen(matrixA, matrixB);
-    double end = omp_get_wtime();
-    double duration = (end - start) * 1e6; // Convert to microseconds
-    cout << "Strassen Time: " << fixed << setprecision(2) << duration << " microseconds\n";
-    cout << "Strassen Correctness: " << (compareMatrices(strassenResult, eigenResult, rowsA, colsB) ? "Correct" : "Incorrect") << "\n";
-
-    // Print results
-    cout << "\nStrassen Result:\n";
-    printMatrix(strassenResult);
-    cout << "\nEigen Result:\n";
-    for (int i = 0; i < rowsA; ++i) {
-        for (int j = 0; j < colsB; ++j) {
-            cout << setw(8) << fixed << setprecision(2) << eigenResult(i, j) << " ";
-        }
-        cout << endl;
-    }
-
-    // Test 2: Large matrices (100x100 * 100x100)
-    cout << "\n=== Test 2: Large Matrices (100x100 * 100x100) ===\n";
-    int largeRowsA = 100, largeColsA = 100, largeRowsB = 100, largeColsB = 100;
-    vector<vector<double>> largeA(largeRowsA, vector<double>(largeColsA));
-    vector<vector<double>> largeB(largeRowsB, vector<double>(largeColsB));
-    for (int i = 0; i < largeRowsA; ++i) {
-        for (int j = 0; j < largeColsA; ++j) {
-            largeA[i][j] = i * largeColsA + j + 1.0; // Unique values
-        }
-    }
-    for (int i = 0; i < largeRowsB; ++i) {
-        for (int j = 0; j < largeColsB; ++j) {
-            largeB[i][j] = (i == j) ? 1.0 : 0.0; // Identity matrix
-        }
-    }
-
-    // Eigen reference result
-    MatrixXd eigenLargeA(largeRowsA, largeColsA);
-    for (int i = 0; i < largeRowsA; ++i) {
-        for (int j = 0; j < largeColsA; ++j) {
-            eigenLargeA(i, j) = largeA[i][j];
-        }
-    }
-    MatrixXd eigenLargeB = MatrixXd::Identity(largeRowsB, largeColsB);
-    MatrixXd eigenLargeResult = eigenLargeA * eigenLargeB;
-
-    // Time and test Strassen
-    start = omp_get_wtime();
-    auto largeStrassenResult = strassen(largeA, largeB);
-    end = omp_get_wtime();
-    duration = (end - start) * 1e6;
-    cout << "Strassen Time: " << fixed << setprecision(2) << duration << " microseconds\n";
-    cout << "Strassen Correctness: " << (compareMatrices(largeStrassenResult, eigenLargeResult, largeRowsA, largeColsB) ? "Correct" : "Incorrect") << "\n";
-
-    return 0;
 }
