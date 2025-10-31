@@ -9,27 +9,13 @@ vector<vector<double>> matrixAdd_parallel(const vector<vector<double>>& A,
     int n = A.size();
     vector<vector<double>> C(n, vector<double>(n, 0.0));
 
-    if(n >= omp_get_num_threads())
+    #pragma openmp taskloop num_tasks(omp_get_num_threads()) if(n > 100)
     {
-        #pragma openmp parallel if(n > 100)
-        #pragma openmp for
-        {
-            for (int i = 0; i < n; ++i)
-                for (int j = 0; j < n; ++j)
-                    C[i][j] = A[i][j] + B[i][j];
-        }
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                C[i][j] = A[i][j] + B[i][j];
     }
 
-    else
-    {
-        #pragma openmp parallel if(n > 100)
-        #pragma openmp for collapse (2)
-        {
-            for (int i = 0; i < n; ++i)
-                for (int j = 0; j < n; ++j)
-                    C[i][j] = A[i][j] + B[i][j];
-        }
-    }
     return C;
 }
 
@@ -38,27 +24,13 @@ vector<vector<double>> matrixSub_parallel(const vector<vector<double>>& A,
     int n = A.size();
     vector<vector<double>> C(n, vector<double>(n, 0.0));
 
-    if(n >= omp_get_num_threads())
+    #pragma openmp taskloop num_tasks(omp_get_num_threads()) if(n > 100)
     {
-        #pragma openmp parallel if(n > 100)
-        #pragma openmp for
-        {
-            for (int i = 0; i < n; ++i)
-                for (int j = 0; j < n; ++j)
-                    C[i][j] = A[i][j] - B[i][j];
-        }
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                C[i][j] = A[i][j] - B[i][j];
     }
 
-    else
-    {
-        #pragma openmp parallel if(n > 100)
-        #pragma openmp for collapse (2)
-        {
-            for (int i = 0; i < n; ++i)
-                for (int j = 0; j < n; ++j)
-                    C[i][j] = A[i][j] - B[i][j];
-        }
-    }
     return C;
 }
 
@@ -253,17 +225,17 @@ vector<vector<double>> strassen_parallel(const vector<vector<double>>& A,
     vector<vector<double>> Apad;
     vector<vector<double>> Bpad;
 
-    #pragma omp parallel
-    {
-        #pragma omp single nowait
-        {
-            #pragma omp task
+    // #pragma omp parallel
+    // {
+    //     #pragma omp single nowait
+    //     {
+    //         #pragma omp task
             Apad = padMatrix_parallel(A, size);
 
-            #pragma omp task
+            // #pragma omp task
             Bpad = padMatrix_parallel(B, size);
-        }
-    }
+    //     }
+    // }
 
     vector<vector<double>> Cpad = strassenMultiply_parallel(Apad, Bpad);
 

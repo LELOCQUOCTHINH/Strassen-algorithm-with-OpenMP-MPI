@@ -37,7 +37,7 @@ double ** naively_matrix_multiplication_sequential(double ** matrixA, int rowsA,
     return matrix_out;
 }
 
-double ** naively_matrix_multiplication_parallel(double ** matrixA, int rowsA, int columnsA, double ** matrixB, int rowsB, int columnsB)
+double ** naively_matrix_multiplication_openmp(double ** matrixA, int rowsA, int columnsA, double ** matrixB, int rowsB, int columnsB)
 {
     if(rowsA < 0 || columnsA < 0 || rowsB < 0 || columnsB < 0)
     {
@@ -60,7 +60,7 @@ double ** naively_matrix_multiplication_parallel(double ** matrixA, int rowsA, i
 
     if(rowsA >= omp_get_max_threads())
     {
-        #pragma openmp parallel default(none) shared(rowsA, columnsB, columnsA, matrix_out, matrixA, matrixB) if(columnsB > 100)
+        #pragma openmp parallel if(rowsA > 100 || columnsB > 100 || columnsA > 100)
         {
             #pragma omp for
             for(int i = 0 ; i < rowsA ; ++i)
@@ -80,7 +80,7 @@ double ** naively_matrix_multiplication_parallel(double ** matrixA, int rowsA, i
     
     else
     {
-        #pragma openmp parallel default(none) shared(rowsA, columnsB, columnsA, matrix_out, matrixA, matrixB) if(columnsB > 100)
+        #pragma openmp parallel if(rowsA > 100 || columnsB > 100 || columnsA > 100)
         {
             double sum = 0; //omp for collapse need a perfect loop so i adjust the declaration position of the sum
             #pragma omp for collapse(3)
@@ -103,6 +103,83 @@ double ** naively_matrix_multiplication_parallel(double ** matrixA, int rowsA, i
     }
 
     return matrix_out;
+}
+
+// ------------------------------------------------------------------
+// 2. NEW: Convert double** ↔ double* (row-major flat)
+// ------------------------------------------------------------------
+double* to_flat_double_star(double** matrix, int rows, int cols) {
+    double* flat = new double[rows * cols];
+    for (int i = 0; i < rows; ++i)
+        for (int j = 0; j < cols; ++j)
+            flat[i * cols + j] = matrix[i][j];
+    return flat;
+}
+
+double** from_flat_double_star(const double* flat, int rows, int cols) {
+    double** matrix = new double*[rows];
+    for (int i = 0; i < rows; ++i) {
+        matrix[i] = new double[cols];
+        for (int j = 0; j < cols; ++j)
+            matrix[i][j] = flat[i * cols + j];
+    }
+    return matrix;
+}
+
+// ------------------------------------------------------------------
+// 3. NEW: GPU-accelerated naive multiply (flat double*)
+// ------------------------------------------------------------------
+double* naively_matrix_multiplication_openmp_cuda(
+    const double* A_flat, int rowsA, int colsA,
+    const double* B_flat, int rowsB, int colsB)
+{
+    if (rowsA <= 0 || colsA <= 0 || rowsB <= 0 || colsB <= 0) {
+        cerr << "Invalid matrix dimensions!\n";
+        return nullptr;
+    }
+    if (colsA != rowsB) {
+        cerr << "Incompatible dimensions for multiplication!\n";
+        return nullptr;
+    }
+
+    double* C_flat = new double[rowsA * colsB]();
+
+    if (rowsA >= omp_get_max_threads()) {
+        #pragma omp target teams if(rowsA > 100 || colsB > 100 || colsA > 100) \
+            map(to: A_flat[0:rowsA*colsA], B_flat[0:rowsB*colsB]) \
+            map(from: C_flat[0:rowsA*colsB])
+        {
+            #pragma omp distribute parallel for
+            for (int i = 0; i < rowsA; ++i) {
+                for (int j = 0; j < colsB; ++j) {
+                    double sum = 0.0;
+                    for (int k = 0; k < colsA; ++k)
+                        sum += A_flat[i*colsA + k] * B_flat[k*colsB + j];
+                    C_flat[i*colsB + j] = sum;
+                }
+            }
+        }
+    } else {
+        #pragma omp target teams \
+        if(rowsA > 100 || colsB > 100 || colsA > 100) \
+            map(to: A_flat[0:rowsA*colsA], B_flat[0:rowsB*colsB]) \
+            map(from: C_flat[0:rowsA*colsB])
+        {
+            double sum = 0.0;
+            #pragma omp distribute parallel for collapse(3)
+            for (int i = 0; i < rowsA; ++i)
+                for (int j = 0; j < colsB; ++j)
+                    for (int k = 0; k < colsA; ++k) {
+                        sum += A_flat[i*colsA + k] * B_flat[k*colsB + j];
+                        if (k + 1 == colsA) {
+                            C_flat[i*colsB + j] = sum;
+                            sum = 0.0;
+                        }
+                    }
+        }
+    }
+
+    return C_flat;
 }
 
 // Function to print a matrix

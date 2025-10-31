@@ -9,6 +9,7 @@
 #include "naively_matrix_multiplication.h"
 #include "strassen_algorithm_sequential.h"
 #include "strassen_algorithm_openmp.h"
+#include "strassen_algorithm_openmp_cuda.h"  // <-- NEW
 
 using namespace std;
 using namespace Eigen;
@@ -30,7 +31,6 @@ void free_raw(double** p, int r) { for (int i = 0; i < r; ++i) delete[] p[i]; de
 size_t bytes(const vector<vector<double>>& m) {
     return m.size() * m[0].size() * sizeof(double);
 }
-size_t bytes(double** p, int r, int c) { return r * c * sizeof(double); }
 
 void fill_random(vector<vector<double>>& m, unsigned seed = 1) {
     mt19937_64 rng(seed);
@@ -45,134 +45,163 @@ void test_one(int rowsA, int colsA, int colsB) {
     cout << "\n=== " << rowsA << "x" << colsA << "  *  " << colsA << "x" << colsB << " ===\n";
 
     // ---- create matrices ------------------------------------------------
-    vector<vector<double>> A(rowsA, vector<double>(colsA));
-    vector<vector<double>> B(colsA, vector<double>(colsB));
-    fill_random(A, 1);
-    fill_random(B, 2);
+    vector<vector<double>> A_vec(rowsA, vector<double>(colsA));
+    vector<vector<double>> B_vec(colsA, vector<double>(colsB));
+    fill_random(A_vec, 1);
+    fill_random(B_vec, 2);
 
     // ---- Eigen reference ------------------------------------------------
-    MatrixXd EA(rowsA, colsA), EB(colsA, colsB), Eref(rowsA, colsB);
-    for (int i = 0; i < rowsA; ++i) for (int j = 0; j < colsA; ++j) EA(i,j) = A[i][j];
-    for (int i = 0; i < colsA; ++i) for (int j = 0; j < colsB; ++j) EB(i,j) = B[i][j];
-    Eref = EA * EB;
+    MatrixXd A_eig(rowsA, colsA), B_eig(colsA, colsB);
+    for (int i = 0; i < rowsA; ++i) for (int j = 0; j < colsA; ++j) A_eig(i,j) = A_vec[i][j];
+    for (int i = 0; i < colsA; ++i) for (int j = 0; j < colsB; ++j) B_eig(i,j) = B_vec[i][j];
+    MatrixXd C_eig = A_eig * B_eig;
 
-    // ---- memory ---------------------------------------------------------
-    size_t memA = bytes(A), memB = bytes(B), memC = rowsA * colsB * sizeof(double);
-    cout << "Memory: A=" << memA/1e6 << " MB, B=" << memB/1e6
-         << " MB, C=" << memC/1e6 << " MB  (total " << (memA+memB+memC)/1e6 << " MB)\n";
+    // ---- Convert to raw double** for legacy functions -------------------
+    double** A_raw = to_raw(A_vec);
+    double** B_raw = to_raw(B_vec);
 
-    double t_seq_naive = 0, t_par_naive = 0;
-    double t_seq_strass = 0, t_par_strass = 0;
+    // ---- Convert to flat double* for CUDA functions ---------------------
+    double* A_flat = to_flat(A_vec, rowsA, colsA);
+    double* B_flat = to_flat(B_vec, colsA, colsB);
 
     // -----------------------------------------------------------------
-    // 1. Sequential naïve
+    // 1. Sequential Naïve
     // -----------------------------------------------------------------
+    double t_seq_naive = 0.0;
+    double** C_seq_naive = nullptr;
     {
-        double** rawA = to_raw(A);
-        double** rawB = to_raw(B);
         double t0 = omp_get_wtime();
-        double** C = naively_matrix_multiplication_sequential(rawA, rowsA, colsA,
-                                                             rawB, colsA, colsB);
+        C_seq_naive = naively_matrix_multiplication_sequential(A_raw, rowsA, colsA, B_raw, colsA, colsB);
         double t1 = omp_get_wtime();
-        t_seq_naive = (t1-t0)*1e6;
-
-        MatrixXd check(rowsA, colsB);
-        for (int i = 0; i < rowsA; ++i)
-            for (int j = 0; j < colsB; ++j) check(i,j) = C[i][j];
-        bool ok = (check - Eref).norm() < 1e-6 * rowsA * colsB;
-        cout << "Seq Naïve  : " << fixed << setprecision(2) << setw(9) << t_seq_naive << " µs  [" << (ok?"PASS":"FAIL") << "]\n";
-
-        free_raw(rawA, rowsA); free_raw(rawB, colsA); free_raw(C, rowsA);
+        t_seq_naive = (t1 - t0) * 1e6;
     }
+    bool ok_seq_naive = compareMatrices(C_seq_naive, C_eig, rowsA, colsB);
+    cout << "Seq Naïve:     " << fixed << setprecision(2) << setw(9) << t_seq_naive << " µs  [" << (ok_seq_naive?"PASS":"FAIL") << "]\n";
 
     // -----------------------------------------------------------------
-    // 2. Parallel naïve
+    // 2. OpenMP Naïve
     // -----------------------------------------------------------------
+    double t_par_naive = 0.0;
+    double** C_par_naive = nullptr;
     {
-        double** rawA = to_raw(A);
-        double** rawB = to_raw(B);
         double t0 = omp_get_wtime();
-        double** C = naively_matrix_multiplication_parallel(rawA, rowsA, colsA,
-                                                           rawB, colsA, colsB);
+        C_par_naive = naively_matrix_multiplication_openmp(A_raw, rowsA, colsA, B_raw, colsA, colsB);
         double t1 = omp_get_wtime();
-        t_par_naive = (t1-t0)*1e6;
-
-        MatrixXd check(rowsA, colsB);
-        for (int i = 0; i < rowsA; ++i)
-            for (int j = 0; j < colsB; ++j) check(i,j) = C[i][j];
-        bool ok = (check - Eref).norm() < 1e-6 * rowsA * colsB;
-        cout << "Par Naïve  : " << fixed << setprecision(2) << setw(9) << t_par_naive << " µs  [" << (ok?"PASS":"FAIL") << "]\n";
-
-        free_raw(rawA, rowsA); free_raw(rawB, colsA); free_raw(C, rowsA);
+        t_par_naive = (t1 - t0) * 1e6;
     }
+    bool ok_par_naive = compareMatrices(C_par_naive, C_eig, rowsA, colsB);
+    cout << "Par Naïve:     " << fixed << setprecision(2) << setw(9) << t_par_naive << " µs  [" << (ok_par_naive?"PASS":"FAIL") << "]\n";
 
     // -----------------------------------------------------------------
     // 3. Sequential Strassen
     // -----------------------------------------------------------------
+    double t_seq_strass = 0.0;
+    vector<vector<double>> C_seq_strass;
     {
         double t0 = omp_get_wtime();
-        auto C = strassen_sequential(A, B);
+        C_seq_strass = strassen_sequential(A_vec, B_vec);
         double t1 = omp_get_wtime();
-        t_seq_strass = (t1-t0)*1e6;
-
-        MatrixXd check(rowsA, colsB);
-        for (int i = 0; i < rowsA; ++i)
-            for (int j = 0; j < colsB; ++j) check(i,j) = C[i][j];
-        bool ok = (check - Eref).norm() < 1e-6 * rowsA * colsB;
-        cout << "Seq Strassen: " << fixed << setprecision(2) << setw(9) << t_seq_strass << " µs  [" << (ok?"PASS":"FAIL") << "]\n";
+        t_seq_strass = (t1 - t0) * 1e6;
     }
+    double** C_seq_strass_raw = to_raw(C_seq_strass);
+    bool ok_seq_strass = compareMatrices(C_seq_strass_raw, C_eig, rowsA, colsB);
+    free_raw(C_seq_strass_raw, rowsA);
+    cout << "Seq Strassen:  " << fixed << setprecision(2) << setw(9) << t_seq_strass << " µs  [" << (ok_seq_strass?"PASS":"FAIL") << "]\n";
 
     // -----------------------------------------------------------------
-    // 4. Parallel Strassen (OpenMP)
+    // 4. OpenMP Strassen
     // -----------------------------------------------------------------
+    double t_par_strass = 0.0;
+    vector<vector<double>> C_par_strass;
     {
         double t0 = omp_get_wtime();
-        auto C = strassen_parallel(A, B);
+        C_par_strass = strassen_parallel(A_vec, B_vec);
         double t1 = omp_get_wtime();
-        t_par_strass = (t1-t0)*1e6;
-
-        MatrixXd check(rowsA, colsB);
-        for (int i = 0; i < rowsA; ++i)
-            for (int j = 0; j < colsB; ++j) check(i,j) = C[i][j];
-        bool ok = (check - Eref).norm() < 1e-6 * rowsA * colsB;
-        cout << "Par Strassen: " << fixed << setprecision(2) << setw(9) << t_par_strass << " µs  [" << (ok?"PASS":"FAIL") << "]\n";
+        t_par_strass = (t1 - t0) * 1e6;
     }
+    double** C_par_strass_raw = to_raw(C_par_strass);
+    bool ok_par_strass = compareMatrices(C_par_strass_raw, C_eig, rowsA, colsB);
+    free_raw(C_par_strass_raw, rowsA);
+    cout << "Par Strassen:  " << fixed << setprecision(2) << setw(9) << t_par_strass << " µs  [" << (ok_par_strass?"PASS":"FAIL") << "]\n";
+
+    // -----------------------------------------------------------------
+    // 5. GPU Naïve (OpenMP Offload)
+    // -----------------------------------------------------------------
+    double t_gpu_naive = 0.0;
+    double* C_gpu_naive_flat = nullptr;
+    {
+        double t0 = omp_get_wtime();
+        C_gpu_naive_flat = naively_matrix_multiplication_openmp_cuda(
+            A_flat, rowsA, colsA, B_flat, colsA, colsB
+        );
+        double t1 = omp_get_wtime();
+        t_gpu_naive = (t1 - t0) * 1e6;
+    }
+    double** C_gpu_naive = from_flat_double_star(C_gpu_naive_flat, rowsA, colsB);
+    bool ok_gpu_naive = compareMatrices(C_gpu_naive, C_eig, rowsA, colsB);
+    cout << "GPU Naïve:     " << fixed << setprecision(2) << setw(9) << t_gpu_naive << " µs  [" << (ok_gpu_naive?"PASS":"FAIL") << "]\n";
+
+    // -----------------------------------------------------------------
+    // 6. GPU Strassen (OpenMP Offload)
+    // -----------------------------------------------------------------
+    double t_gpu_strass = 0.0;
+    vector<double> C_gpu_strass_flat;
+    {
+        vector<double> A_flat_vec(A_flat, A_flat + rowsA*colsA);
+        vector<double> B_flat_vec(B_flat, B_flat + colsA*colsB);
+
+        double t0 = omp_get_wtime();
+        C_gpu_strass_flat = strassen_parallel_cuda(
+            A_flat_vec, rowsA, colsA,
+            B_flat_vec, colsA, colsB
+        );
+        double t1 = omp_get_wtime();
+        t_gpu_strass = (t1 - t0) * 1e6;
+    }
+    vector<vector<double>> C_gpu_strass_vec = from_flat(C_gpu_strass_flat.data(), rowsA, colsB);
+    double** C_gpu_strass_raw = to_raw(C_gpu_strass_vec);
+    bool ok_gpu_strass = compareMatrices(C_gpu_strass_raw, C_eig, rowsA, colsB);
+    free_raw(C_gpu_strass_raw, rowsA);
+    cout << "GPU Strassen:  " << fixed << setprecision(2) << setw(9) << t_gpu_strass << " µs  [" << (ok_gpu_strass?"PASS":"FAIL") << "]\n";
 
     // -----------------------------------------------------------------
     // Speed-up
     // -----------------------------------------------------------------
-    if (t_seq_naive > 0)
-        cout << "  Speed-up (Par/Seq Naïve)   : " << fixed << setprecision(2) << t_seq_naive/t_par_naive << "x\n";
-    if (t_seq_strass > 0)
-        cout << "  Speed-up (Par/Seq Strassen): " << fixed << setprecision(2) << t_seq_strass/t_par_strass << "x\n";
+    if (t_seq_naive > 0) {
+        cout << "  Speed-up (GPU Naïve / Seq Naïve)   : " << fixed << setprecision(2) << t_seq_naive/t_gpu_naive << "x\n";
+        cout << "  Speed-up (GPU Naïve / Par Naïve)   : " << fixed << setprecision(2) << t_par_naive/t_gpu_naive << "x\n";
+    }
+    if (t_seq_strass > 0) {
+        cout << "  Speed-up (GPU Strassen / Seq Strassen): " << fixed << setprecision(2) << t_seq_strass/t_gpu_strass << "x\n";
+        cout << "  Speed-up (GPU Strassen / Par Strassen): " << fixed << setprecision(2) << t_par_strass/t_gpu_strass << "x\n";
+    }
+
+    // -----------------------------------------------------------------
+    // Cleanup
+    // -----------------------------------------------------------------
+    free_raw(A_raw, rowsA);
+    free_raw(B_raw, colsA);
+    free_raw(C_seq_naive, rowsA);
+    free_raw(C_par_naive, rowsA);
+    free_raw(C_gpu_naive, rowsA);
+    delete[] A_flat;
+    delete[] B_flat;
+    delete[] C_gpu_naive_flat;
 }
 
 // ------------------------------------------------------------------
-// 5. main – list of test cases
+// main – test cases
 // ------------------------------------------------------------------
 int main() {
     cout << fixed << setprecision(2);
     cout << "OpenMP threads: " << omp_get_max_threads() << "\n\n";
 
-    // -----------------------------------------------------------------
-    // Small sanity checks (square & rectangular)
-    // -----------------------------------------------------------------
-    test_one(3, 5, 6);      // 3×5  * 5×6  → 3×6
-    test_one(100, 50, 80);  // 100×50 * 50×80 → 100×80
-    test_one(64, 64, 64);   // classic square
-
-    // -----------------------------------------------------------------
-    // Large square matrices
-    // -----------------------------------------------------------------
+    test_one(3, 5, 6);
+    test_one(100, 50, 80);
+    test_one(64, 64, 64);
     test_one(1000, 1000, 1000);
-    // test_one(100000, 100000, 100000);   // uncomment when you have ~80 GB RAM
-    // test_one(1000000, 1000000, 1000000); // ~8 TB – only for clusters
-
-    // -----------------------------------------------------------------
-    // Large rectangular (rows >> cols  and  cols >> rows)
-    // -----------------------------------------------------------------
-    test_one(2000, 500, 800);   // tall
-    test_one(500, 2000, 800);   // wide
+    test_one(2000, 500, 800);
+    test_one(500, 2000, 800);
 
     return 0;
 }

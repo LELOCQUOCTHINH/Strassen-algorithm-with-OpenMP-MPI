@@ -10,3 +10,5 @@
 !strassen_algorithm_openmp.h
 !strassen_algorithm_sequential.h
 !comparisor.cpp
+!strassen_algorithm_openmp_cuda.h
+!strassen_algorithm_openmp_cuda.cpp
