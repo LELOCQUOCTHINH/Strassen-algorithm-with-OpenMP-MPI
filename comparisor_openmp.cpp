@@ -1,4 +1,4 @@
-// comparisor.cpp
+// comparisor_openmp.cpp - CPU-only versions: Naive Seq/Par, Strassen Seq/Par
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -9,7 +9,6 @@
 #include "naively_matrix_multiplication.h"
 #include "strassen_algorithm_sequential.h"
 #include "strassen_algorithm_openmp.h"
-#include "strassen_algorithm_openmp_cuda.h"  // <-- NEW
 
 using namespace std;
 using namespace Eigen;
@@ -59,10 +58,6 @@ void test_one(int rowsA, int colsA, int colsB) {
     // ---- Convert to raw double** for legacy functions -------------------
     double** A_raw = to_raw(A_vec);
     double** B_raw = to_raw(B_vec);
-
-    // ---- Convert to flat double* for CUDA functions ---------------------
-    double* A_flat = to_flat(A_vec, rowsA, colsA);
-    double* B_flat = to_flat(B_vec, colsA, colsB);
 
     // -----------------------------------------------------------------
     // 1. Sequential Naïve
@@ -125,55 +120,24 @@ void test_one(int rowsA, int colsA, int colsB) {
     cout << "Par Strassen:  " << fixed << setprecision(2) << setw(9) << t_par_strass << " µs  [" << (ok_par_strass?"PASS":"FAIL") << "]\n";
 
     // -----------------------------------------------------------------
-    // 5. GPU Naïve (OpenMP Offload)
+    // Speed-ups (sequential / other)
     // -----------------------------------------------------------------
-    double t_gpu_naive = 0.0;
-    double* C_gpu_naive_flat = nullptr;
-    {
-        double t0 = omp_get_wtime();
-        C_gpu_naive_flat = naively_matrix_multiplication_openmp_cuda(
-            A_flat, rowsA, colsA, B_flat, colsA, colsB
-        );
-        double t1 = omp_get_wtime();
-        t_gpu_naive = (t1 - t0) * 1e6;
+    cout << "\n--- Speed-ups (baseline / optimized) ---\n";
+    if (t_seq_naive > 0 && t_seq_strass > 0) {
+        cout << "  Strassen Seq / Naive Seq       : " << fixed << setprecision(2) 
+            << t_seq_naive / t_seq_strass << "x\n";
     }
-    double** C_gpu_naive = from_flat_double_star(C_gpu_naive_flat, rowsA, colsB);
-    bool ok_gpu_naive = compareMatrices(C_gpu_naive, C_eig, rowsA, colsB);
-    cout << "GPU Naïve:     " << fixed << setprecision(2) << setw(9) << t_gpu_naive << " µs  [" << (ok_gpu_naive?"PASS":"FAIL") << "]\n";
-
-    // -----------------------------------------------------------------
-    // 6. GPU Strassen (OpenMP Offload)
-    // -----------------------------------------------------------------
-    double t_gpu_strass = 0.0;
-    vector<double> C_gpu_strass_flat;
-    {
-        vector<double> A_flat_vec(A_flat, A_flat + rowsA*colsA);
-        vector<double> B_flat_vec(B_flat, B_flat + colsA*colsB);
-
-        double t0 = omp_get_wtime();
-        C_gpu_strass_flat = strassen_parallel_cuda(
-            A_flat_vec, rowsA, colsA,
-            B_flat_vec, colsA, colsB
-        );
-        double t1 = omp_get_wtime();
-        t_gpu_strass = (t1 - t0) * 1e6;
+    if (t_seq_naive > 0 && t_par_naive > 0) {
+        cout << "  Naive Par / Naive Seq          : " << fixed << setprecision(2) 
+            << t_seq_naive / t_par_naive << "x\n";
     }
-    vector<vector<double>> C_gpu_strass_vec = from_flat(C_gpu_strass_flat.data(), rowsA, colsB);
-    double** C_gpu_strass_raw = to_raw(C_gpu_strass_vec);
-    bool ok_gpu_strass = compareMatrices(C_gpu_strass_raw, C_eig, rowsA, colsB);
-    free_raw(C_gpu_strass_raw, rowsA);
-    cout << "GPU Strassen:  " << fixed << setprecision(2) << setw(9) << t_gpu_strass << " µs  [" << (ok_gpu_strass?"PASS":"FAIL") << "]\n";
-
-    // -----------------------------------------------------------------
-    // Speed-up
-    // -----------------------------------------------------------------
-    if (t_seq_naive > 0) {
-        cout << "  Speed-up (GPU Naïve / Seq Naïve)   : " << fixed << setprecision(2) << t_seq_naive/t_gpu_naive << "x\n";
-        cout << "  Speed-up (GPU Naïve / Par Naïve)   : " << fixed << setprecision(2) << t_par_naive/t_gpu_naive << "x\n";
+    if (t_seq_strass > 0 && t_par_strass > 0) {
+        cout << "  Strassen Par / Strassen Seq    : " << fixed << setprecision(2) 
+            << t_seq_strass / t_par_strass << "x\n";
     }
-    if (t_seq_strass > 0) {
-        cout << "  Speed-up (GPU Strassen / Seq Strassen): " << fixed << setprecision(2) << t_seq_strass/t_gpu_strass << "x\n";
-        cout << "  Speed-up (GPU Strassen / Par Strassen): " << fixed << setprecision(2) << t_par_strass/t_gpu_strass << "x\n";
+    if (t_par_naive > 0 && t_par_strass > 0) {
+        cout << "  Strassen Par / Naive Par       : " << fixed << setprecision(2) 
+            << t_par_naive / t_par_strass << "x\n";
     }
 
     // -----------------------------------------------------------------
@@ -183,10 +147,6 @@ void test_one(int rowsA, int colsA, int colsB) {
     free_raw(B_raw, colsA);
     free_raw(C_seq_naive, rowsA);
     free_raw(C_par_naive, rowsA);
-    free_raw(C_gpu_naive, rowsA);
-    delete[] A_flat;
-    delete[] B_flat;
-    delete[] C_gpu_naive_flat;
 }
 
 // ------------------------------------------------------------------
@@ -197,8 +157,8 @@ int main() {
     cout << "OpenMP threads: " << omp_get_max_threads() << "\n\n";
 
     test_one(3, 5, 6);
-    test_one(100, 50, 80);
     test_one(64, 64, 64);
+    test_one(100, 50, 80);
     test_one(1000, 1000, 1000);
     test_one(2000, 500, 800);
     test_one(500, 2000, 800);

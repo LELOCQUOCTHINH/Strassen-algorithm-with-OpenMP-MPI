@@ -9,13 +9,15 @@ vector<vector<double>> matrixAdd_parallel(const vector<vector<double>>& A,
     int n = A.size();
     vector<vector<double>> C(n, vector<double>(n, 0.0));
 
-    #pragma openmp taskloop num_tasks(omp_get_num_threads()) if(n > 100)
+    // #pragma openmp taskloop num_tasks(omp_get_num_threads()) if(n > 100)
+    #pragma openmp parallel taskloop if(n > 100)
     {
         for (int i = 0; i < n; ++i)
             for (int j = 0; j < n; ++j)
                 C[i][j] = A[i][j] + B[i][j];
     }
 
+    // cout<<"ADDED!" <<endl ;
     return C;
 }
 
@@ -24,13 +26,14 @@ vector<vector<double>> matrixSub_parallel(const vector<vector<double>>& A,
     int n = A.size();
     vector<vector<double>> C(n, vector<double>(n, 0.0));
 
-    #pragma openmp taskloop num_tasks(omp_get_num_threads()) if(n > 100)
+    #pragma openmp parallel taskloop if(n > 100)
+    // #pragma openmp taskloop num_tasks(omp_get_num_threads()) if(n > 100)
     {
         for (int i = 0; i < n; ++i)
             for (int j = 0; j < n; ++j)
                 C[i][j] = A[i][j] - B[i][j];
     }
-
+    // cout<<"Subtration!" <<endl ;
     return C;
 }
 
@@ -42,6 +45,8 @@ vector<vector<double>> naiveMultiply_parallel(const vector<vector<double>>& A,
         for (int j = 0; j < n; ++j)
             for (int k = 0; k < n; ++k)
                 C[i][j] += A[i][k] * B[k][j];
+
+    // cout<<"EVERYTHING MAYBE OK!" <<endl ;
     return C;
 }
 
@@ -237,7 +242,10 @@ vector<vector<double>> strassen_parallel(const vector<vector<double>>& A,
     //     }
     // }
 
+    // cout << "WORK HERE!\n";
+    // cout<<"Call The function!\n";
     vector<vector<double>> Cpad = strassenMultiply_parallel(Apad, Bpad);
+    // cout<<"The function work!\n";
 
     return unpadMatrix_parallel(Cpad, rowsA, colsB);
 }

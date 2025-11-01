@@ -144,38 +144,16 @@ double* naively_matrix_multiplication_openmp_cuda(
 
     double* C_flat = new double[rowsA * colsB]();
 
-    if (rowsA >= omp_get_max_threads()) {
-        #pragma omp target teams if(rowsA > 100 || colsB > 100 || colsA > 100) \
-            map(to: A_flat[0:rowsA*colsA], B_flat[0:rowsB*colsB]) \
-            map(from: C_flat[0:rowsA*colsB])
-        {
-            #pragma omp distribute parallel for
-            for (int i = 0; i < rowsA; ++i) {
-                for (int j = 0; j < colsB; ++j) {
-                    double sum = 0.0;
-                    for (int k = 0; k < colsA; ++k)
-                        sum += A_flat[i*colsA + k] * B_flat[k*colsB + j];
-                    C_flat[i*colsB + j] = sum;
-                }
-            }
-        }
-    } else {
-        #pragma omp target teams \
-        if(rowsA > 100 || colsB > 100 || colsA > 100) \
-            map(to: A_flat[0:rowsA*colsA], B_flat[0:rowsB*colsB]) \
-            map(from: C_flat[0:rowsA*colsB])
-        {
+    #pragma omp target teams distribute parallel for collapse(2) \
+        map(to: A_flat[0:rowsA*colsA], B_flat[0:rowsB*colsB]) \
+        map(from: C_flat[0:rowsA*colsB])
+    for (int i = 0; i < rowsA; ++i) {
+        for (int j = 0; j < colsB; ++j) {
             double sum = 0.0;
-            #pragma omp distribute parallel for collapse(3)
-            for (int i = 0; i < rowsA; ++i)
-                for (int j = 0; j < colsB; ++j)
-                    for (int k = 0; k < colsA; ++k) {
-                        sum += A_flat[i*colsA + k] * B_flat[k*colsB + j];
-                        if (k + 1 == colsA) {
-                            C_flat[i*colsB + j] = sum;
-                            sum = 0.0;
-                        }
-                    }
+            for (int k = 0; k < colsA; ++k) {
+                sum += A_flat[i * colsA + k] * B_flat[k * colsB + j];
+            }
+            C_flat[i * colsB + j] = sum;
         }
     }
 

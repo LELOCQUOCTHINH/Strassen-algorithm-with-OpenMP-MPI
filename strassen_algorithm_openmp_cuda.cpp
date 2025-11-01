@@ -27,9 +27,8 @@
 static void matrixAdd_parallel_cuda(const double* A, const double* B,
                                     double* C, int n)
 {
-    #pragma omp target teams if(n > 100) \
-        map(to:A[0:n*n],B[0:n*n]) map(from:C[0:n*n])
-    #pragma omp distribute parallel for collapse(2)
+    #pragma omp target teams distribute parallel for collapse(2) \
+        map(to: A[0:n*n], B[0:n*n]) map(from: C[0:n*n])
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
             C[i*n + j] = A[i*n + j] + B[i*n + j];
@@ -39,9 +38,8 @@ static void matrixAdd_parallel_cuda(const double* A, const double* B,
 static void matrixSub_parallel_cuda(const double* A, const double* B,
                                     double* C, int n)
 {
-    #pragma omp target teams if(n > 100) \
-        map(to:A[0:n*n],B[0:n*n]) map(from:C[0:n*n])
-    #pragma omp distribute parallel for collapse(2)
+    #pragma omp target teams distribute parallel for collapse(2) \
+        map(to: A[0:n*n], B[0:n*n]) map(from: C[0:n*n])
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
             C[i*n + j] = A[i*n + j] - B[i*n + j];
@@ -103,65 +101,41 @@ static void strassenMultiply_parallel_cuda(const double* A, const double* B,
            *tmp6a = new double[sub], *tmp6b = new double[sub],
            *tmp7a = new double[sub], *tmp7b = new double[sub];
 
-    // --- 7 FULLY INDEPENDENT TASKS (no shared tmp!) ---
-    #pragma omp parallel
-    #pragma omp single
-    {
-        #pragma omp task
-        {
-            matrixSub_parallel_cuda(B12, B22, tmp1, mid);
-            strassenMultiply_parallel_cuda(A11, tmp1, P1, mid);
-        }
-        #pragma omp task
-        {
-            matrixAdd_parallel_cuda(A11, A12, tmp2, mid);
-            strassenMultiply_parallel_cuda(tmp2, B22, P2, mid);
-        }
-        #pragma omp task
-        {
-            matrixAdd_parallel_cuda(A21, A22, tmp3, mid);
-            strassenMultiply_parallel_cuda(tmp3, B11, P3, mid);
-        }
-        #pragma omp task
-        {
-            matrixSub_parallel_cuda(B21, B11, tmp4, mid);
-            strassenMultiply_parallel_cuda(A22, tmp4, P4, mid);
-        }
-        #pragma omp task
-        {
-            matrixAdd_parallel_cuda(A11, A22, tmp5a, mid);
-            matrixAdd_parallel_cuda(B11, B22, tmp5b, mid);
-            strassenMultiply_parallel_cuda(tmp5a, tmp5b, P5, mid);
-        }
-        #pragma omp task
-        {
-            matrixSub_parallel_cuda(A12, A22, tmp6a, mid);
-            matrixAdd_parallel_cuda(B21, B22, tmp6b, mid);
-            strassenMultiply_parallel_cuda(tmp6a, tmp6b, P6, mid);
-        }
-        #pragma omp task
-        {
-            matrixSub_parallel_cuda(A11, A21, tmp7a, mid);
-            matrixAdd_parallel_cuda(B11, B12, tmp7b, mid);
-            strassenMultiply_parallel_cuda(tmp7a, tmp7b, P7, mid);
-        }
-    } // end parallel single — all 7 tasks now run concurrently!
-    
-    #pragma omp parallel sections
-    {
-        #pragma omp section
-        { matrixAdd_parallel_cuda(P5, P4, tmp1, mid);
-          matrixAdd_parallel_cuda(tmp1, P6, tmp2, mid);
-          matrixSub_parallel_cuda(tmp2, P2, C11, mid); }
-        #pragma omp section
-        { matrixAdd_parallel_cuda(P1, P2, C12, mid); }
-        #pragma omp section
-        { matrixAdd_parallel_cuda(P3, P4, C21, mid); }
-        #pragma omp section
-        { matrixAdd_parallel_cuda(P5, P1, tmp3, mid);
-          matrixAdd_parallel_cuda(P3, P7, tmp4, mid);
-          matrixSub_parallel_cuda(tmp3, tmp4, C22, mid); }
-    }
+    matrixSub_parallel_cuda(B12, B22, tmp1, mid);
+    strassenMultiply_parallel_cuda(A11, tmp1, P1, mid);
+
+    matrixAdd_parallel_cuda(A11, A12, tmp2, mid);
+    strassenMultiply_parallel_cuda(tmp2, B22, P2, mid);
+
+    matrixAdd_parallel_cuda(A21, A22, tmp3, mid);
+    strassenMultiply_parallel_cuda(tmp3, B11, P3, mid);
+
+    matrixSub_parallel_cuda(B21, B11, tmp4, mid);
+    strassenMultiply_parallel_cuda(A22, tmp4, P4, mid);
+
+    matrixAdd_parallel_cuda(A11, A22, tmp5a, mid);
+    matrixAdd_parallel_cuda(B11, B22, tmp5b, mid);
+    strassenMultiply_parallel_cuda(tmp5a, tmp5b, P5, mid);
+
+    matrixSub_parallel_cuda(A12, A22, tmp6a, mid);
+    matrixAdd_parallel_cuda(B21, B22, tmp6b, mid);
+    strassenMultiply_parallel_cuda(tmp6a, tmp6b, P6, mid);
+
+    matrixSub_parallel_cuda(A11, A21, tmp7a, mid);
+    matrixAdd_parallel_cuda(B11, B12, tmp7b, mid);
+    strassenMultiply_parallel_cuda(tmp7a, tmp7b, P7, mid);
+
+    matrixAdd_parallel_cuda(P5, P4, tmp1, mid);
+    matrixAdd_parallel_cuda(tmp1, P6, tmp2, mid);
+    matrixSub_parallel_cuda(tmp2, P2, C11, mid);
+
+    matrixAdd_parallel_cuda(P1, P2, C12, mid);
+
+    matrixAdd_parallel_cuda(P3, P4, C21, mid); 
+
+    matrixAdd_parallel_cuda(P5, P1, tmp3, mid);
+    matrixAdd_parallel_cuda(P3, P7, tmp4, mid);
+    matrixSub_parallel_cuda(tmp3, tmp4, C22, mid);
 
     #pragma openmp parallel if (mid > 100)
     #pragma openmp for

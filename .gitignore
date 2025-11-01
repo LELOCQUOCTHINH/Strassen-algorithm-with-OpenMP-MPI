@@ -9,6 +9,7 @@
 !naively_matrix_multiplication.h
 !strassen_algorithm_openmp.h
 !strassen_algorithm_sequential.h
-!comparisor.cpp
 !strassen_algorithm_openmp_cuda.h
 !strassen_algorithm_openmp_cuda.cpp
+!comparisor_cuda.cpp
+!comparisor_openmp.cpp
